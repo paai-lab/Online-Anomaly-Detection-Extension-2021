@@ -256,8 +256,11 @@ input[which(input$start !=1),'start'] =0
           data = data[which(!is.element(data[,1], del_case)),]
           pre3= pre2[which(!is.element(pre2[,1], del_case)),]
           label = as.character(pre3[,c("anomaly_type")])
+          c=unique(pre3[,c("Case","anomaly_type")]) #revision2
+          
         }else{
           label = as.character(pre2[,c("anomaly_type")])
+          pre3=pre2; c=unique(pre3[,c("Case","anomaly_type")])      #revision2
         }
         
         if(embedding_size_p>0){
@@ -317,11 +320,12 @@ input[which(input$start !=1),'start'] =0
           x2 = x2[,1:(prefixL[length(prefixL)]*embedding_size)]
           
         }else{
-          object_case = pre2$Case[nrow(pre2)]
-          object_event = pre2$Event[nrow(pre2)]
+          object_case = pre3$Case[nrow(pre3)]       #revision2
+          object_event = pre3$Event[nrow(pre3)]     #revision2
           data$ID <- as.factor(data$ID)
           data$ActivityID <- as.factor(data$ActivityID)
           
+          #revision2
           # One-hot encoding
           data1 <- fun_onehot(data)      
           newdat <- cbind(data[,1], data1)
@@ -331,36 +335,52 @@ input[which(input$start !=1),'start'] =0
           num_act= ncol(newdat)-1
           num_event = nrow(newdat)
           max<- m*num_act
-          newdat2<- matrix(NA, nrow=num_event , ncol=max)  
+          newdat2<- matrix(NA, nrow=n , ncol=max)
           prefixL = as.numeric()
-          for(j in 1:num_event){
-            cut = newdat[which(newdat[1:j,1]== newdat[j,1] ),-1]
-            if(class(cut)=='numeric'){
-              prefixL[j] = 1
-            }else{
-              prefixL[j] = nrow(cut)
-            }            
-            save2 <- as.vector(t(cut))  
+          for(j in 1:n){
+            cut = newdat[which(newdat[,1]== c[j,1] ),-1]
+            save2 <- as.vector(t(cut))
+            prefixL[j] = sum(save2)
             newdat2[j,1:length(save2)] <- save2
           }
           
-          act_save = names(newdat) #change 1
-          newdat2[which(is.na(newdat2))] <- 0 # zero-padding
-          newdat2_save= newdat2
-          newdat3 <-data.frame(cbind(Case= as.character(newdat[,1]), label= label, newdat2))
-          
-          x2= newdat3[which(prefixL == prefixL[length(prefixL)]),-(1:2)]
-          x2 = x2[,1:(prefixL[length(prefixL)]*num_act)]
+          CP = prefixL[which(c[,1]== object_case)]
+          newdat2 = newdat2[which(prefixL >= CP),]
+          if( length(which(prefixL >= CP)) != 1 ){
+            newdat2 = newdat2[, 1:(CP*num_act)]
+            loc =  which(c[which(prefixL >= CP),1] == object_case)
+            
+            
+            newdat2[which(is.na(newdat2))] <- 0 # zero-padding
+            newdat2_save= newdat2
+            newdat3= cbind(c[which(prefixL >= CP),], newdat2)
+            act_save = names(newdat) #change 1
+            # newdat3 <-data.frame(cbind(Case= as.character(newdat[,1]), label= label, newdat2))
+            x2= newdat3[,-(1:2)]
+            
+            
+          }else{
+            x2= NA
+          }
         }
         
-        #Calculate leverage
-        x= as.matrix(sapply(x2, as.numeric))  
-        h_diag <- fun_itree(x)
-        pre[i, 'leverage'] = h_diag[length(h_diag)]
-        leverage_end <- Sys.time()
-        print(paste("Anomaly score of", i ,"-th event = ", round( h_diag[length(h_diag)],5), " (CaseID=",object_case,")" ,sep=''))
-        pre[i, 'time'] =   (leverage_end-leverage_start)
-        pre[i, 'tn'] = (h_diag[length(h_diag)] > (mean(h_diag)+sd(h_diag)))
+        #revision2
+        if(is.na(x2)){
+          pre[i, 'leverage'] = 0
+          leverage_end <- Sys.time()
+          print(paste("Anomaly score of", i ,"-th event = ", 0, " (CaseID=",object_case,")" ,sep=''))
+          pre[i, 'time'] =   (leverage_end-leverage_start)
+          pre[i, 'tn'] = 0
+        }else{
+          #Calculate leverage
+          x= as.matrix(sapply(x2, as.numeric))  
+          h_diag <- fun_itree(x)
+          pre[i, 'leverage'] = h_diag[loc]
+          leverage_end <- Sys.time()
+          print(paste("Anomaly score of", i ,"-th event = ", round( h_diag[loc],5), " (CaseID=",object_case,")" ,sep=''))
+          pre[i, 'time'] =   (leverage_end-leverage_start)
+          pre[i, 'tn'] = (h_diag[loc] > (mean(h_diag)+sd(h_diag)))
+        }
       }
       return(pre)
     }

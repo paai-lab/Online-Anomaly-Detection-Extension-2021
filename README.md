@@ -16,6 +16,11 @@ For all logs, we injected 6 types of anomaly patterns including "insert", "skip"
 ## Options in online setting
 There are 3 design options: Prefix-length or Trace-level (batch=True/False in streaming_score function of code), Deep_embedding (embedding_size_p = rate in [0,1], if 0, deep embedding will not be applied), and Removing (remove = True/False). Note that, in paper, the deep_embedding option has not been introduced since it does not show any interesting point for us. 
 
+## Performance comparison with baselines (OC-SVM, iForest)
+
+
+<img src="./data/t1.PNG" width="800" />
+<img src="./data/t2.PNG" width="800" />
 
 &#x1F53A; Be careful to correctly set your working directory for each R file as uploaded files contain my own local directory.
 

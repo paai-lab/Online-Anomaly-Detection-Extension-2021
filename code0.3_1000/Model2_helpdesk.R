@@ -78,9 +78,9 @@ input[which(input$start !=1),'start'] =0
     return(onehot)
   }
   
-  fun_batch_remove_TRUE = function(input, Min, start_index, Max, until, embedding_size_p, remove_threshold ){}
+  fun_batch_remove_TRUE = function(input, Min, start_index, Max, until,T, eMax, embedding_size_p, remove_threshold ){}
   
-  fun_batch_remove_FALSE = function(input, Min,start_index, Max, until, embedding_size_p ){
+  fun_batch_remove_FALSE = function(input, Min,start_index, Max, until,T, eMax, embedding_size_p ){
     #prepare data
     pre<-input
     pre= pre[ with(pre, order(Case,timestamp)),]
@@ -91,8 +91,8 @@ input[which(input$start !=1),'start'] =0
     pre[,'Event'] = as.factor(1:nrow(pre))
     pre[,'num_case'] = cumsum(pre$start)
     pre[,'leverage'] = rep(-1, nrow(pre))
-    pre[,'t1'] = rep(0, nrow(pre))
-    pre[,'t2'] = rep(0, nrow(pre))
+    pre[,'TF'] = rep(0, nrow(pre))
+    pre[,'w-TF'] = rep(0, nrow(pre))
     pre[,'t3'] = rep(0, nrow(pre))
     pre[,'tn']= rep(0, nrow(pre))
     pre[,'time'] = rep(0, nrow(pre))
@@ -128,7 +128,7 @@ input[which(input$start !=1),'start'] =0
       last_index = nrow(pre)
     }
     
-    if(start_index == last_index){
+    if(nrow(pre2) > eMax & eMax != 0){       stop(paste("too small eMax input compared with Max input: recommended over: ", nrow(pre2), sep = '') )     }; if(start_index == last_index){
       #skip
     }else{
     
@@ -215,7 +215,7 @@ input[which(input$start !=1),'start'] =0
     leverage_end <- Sys.time()
     
     pre[start_index, 'time'] =   (leverage_end-leverage_start)
-    pre[start_index, 'tn'] = (h_diag[length(h_diag)] > (mean(h_diag)+sd(h_diag)))
+    pre[start_index, 'tn'] = (h_diag[length(h_diag)] > (mean(h_diag)+sd(h_diag))); pre[start_index, 'TF'] = (h_diag[length(h_diag)] > T)
     
     #Set escape option
     if(until==0){
@@ -242,10 +242,34 @@ input[which(input$start !=1),'start'] =0
         del_case = del_case[1:(cur_len-Max)] 
         del_case= del_case[which(!is.element(del_case, object_case))]
         data = data[which(!is.element(data[,1], del_case)),]
+        #revison
+        elen = nrow(data)
+        if(elen > eMax & eMax != 0){
+          del_case2 = pre2[which(pre2$start==1),'Case']
+          del_case2= del_case2[cur_len-Max+1]
+          data = data[which(!is.element(data[,1], del_case2)),]
+          del_case = c(del_case, del_case2)
+        }
         pre3= pre2[which(!is.element(pre2[,1], del_case)),]
         label = as.character(pre3[,c("anomaly_type")])
+        
+        c=unique(pre3[,c("Case","anomaly_type")]) #revision2
+        
       }else{
-        label = as.character(pre2[,c("anomaly_type")])
+        #revison
+        elen = nrow(data)
+        if(elen > eMax & eMax != 0){
+          del_case2 = pre2[which(pre2$start==1),'Case']
+          del_case2= del_case2[1]
+          data = data[which(!is.element(data[,1], del_case2)),]
+          pre3= pre2[which(!is.element(pre2[,1], del_case2)),]
+          label = as.character(pre3[,c("anomaly_type")])
+          c=unique(pre3[,c("Case","anomaly_type")])
+        }else{
+          label = as.character(pre2[,c("anomaly_type")])
+          c=unique(pre2[,c("Case","anomaly_type")])
+          pre3=pre2      #revision2
+        }
       }
       
       if(embedding_size_p>0){
@@ -301,11 +325,12 @@ input[which(input$start !=1),'start'] =0
         x2 = x2[,1:(prefixL[length(prefixL)]*embedding_size)]
         
       }else{
-        object_case = pre2$Case[nrow(pre2)]
-        object_event = pre2$Event[nrow(pre2)]
+        object_case = pre3$Case[nrow(pre3)]       #revision2
+        object_event = pre3$Event[nrow(pre3)]     #revision2
         data$ID <- as.factor(data$ID)
         data$ActivityID <- as.factor(data$ActivityID)
         
+        #revision2
         # One-hot encoding
         data1 <- fun_onehot(data)      
         newdat <- cbind(data[,1], data1)
@@ -315,54 +340,70 @@ input[which(input$start !=1),'start'] =0
         num_act= ncol(newdat)-1
         num_event = nrow(newdat)
         max<- m*num_act
-        newdat2<- matrix(NA, nrow=num_event , ncol=max)  
+        newdat2<- matrix(NA, nrow=n , ncol=max)
         prefixL = as.numeric()
-        for(j in 1:num_event){
-          cut = newdat[which(newdat[1:j,1]== newdat[j,1] ),-1]
-          prefixL[j] = nrow(cut)
-          save2 <- as.vector(t(cut))  
+        for(j in 1:n){
+          cut = newdat[which(newdat[,1]== c[j,1] ),-1]
+          save2 <- as.vector(t(cut))
+          prefixL[j] = sum(save2)
           newdat2[j,1:length(save2)] <- save2
         }
         
-        act_save = names(newdat) #change 1
-        newdat2[which(is.na(newdat2))] <- 0 # zero-padding
-        newdat2_save= newdat2
-        newdat3 <-data.frame(cbind(Case= as.character(newdat[,1]), label= label, newdat2))
-        
-        x2= newdat3[which(prefixL == prefixL[length(prefixL)]),-(1:2)]
-        x2 = x2[,1:(prefixL[length(prefixL)]*num_act)]
+        CP = prefixL[which(c[,1]== object_case)]
+        newdat2 = newdat2[which(prefixL >= CP),]
+        if( length(which(prefixL >= CP)) != 1 ){
+          newdat2 = newdat2[, 1:(CP*num_act)]
+          loc =  which(c[which(prefixL >= CP),1] == object_case)
+          
+          
+          newdat2[which(is.na(newdat2))] <- 0 # zero-padding
+          newdat2_save= newdat2
+          newdat3= cbind(c[which(prefixL >= CP),], newdat2)
+          act_save = names(newdat) #change 1
+          # newdat3 <-data.frame(cbind(Case= as.character(newdat[,1]), label= label, newdat2))
+          x2= newdat3[,-(1:2)]
+          
+          
+        }else{
+          x2= NA
+        }
       }
       
-      #Calculate leverage
-      x= as.matrix(sapply(x2, as.numeric))  
-      h_diag <- fun_leverage(x)
-      pre[i, 'leverage'] = h_diag[length(h_diag)]
+      #revision2
+      if(is.na(x2)){
+        pre[i, 'leverage'] = 0
+      }else{
+        #Calculate leverage
+        x= as.matrix(sapply(x2, as.numeric))  
+        h_diag <- fun_leverage(x)
+        pre[i, 'leverage'] = h_diag[loc]
+      }
       leverage_end <- Sys.time()
       print(paste("Anomaly score of", i ,"-th event = ", round( h_diag[length(h_diag)],5), " (CaseID=",object_case,")" ,sep=''))
       pre[i, 'time'] =   (leverage_end-leverage_start)
-      pre[i, 'tn'] = (h_diag[length(h_diag)] > (mean(h_diag)+sd(h_diag)))
+      pre[i, 'tn'] = (h_diag[length(h_diag)] > (mean(h_diag)+sd(h_diag))); pre[i, 'TF'] = (h_diag[length(h_diag)] > T)
     }
     return(pre)
     }
   }
   
-  fun_remove_TRUE = function(input, Min,start_index, Max, until,embedding_size_p, remove_threshold ){}
+  fun_remove_TRUE = function(input, Min,start_index, Max, until,T, eMax,embedding_size_p, remove_threshold ){}
   
-  fun_remove_FALSE = function(input, Min, start_index, Max, until, embedding_size_p){}
+  fun_remove_FALSE = function(input, Min, start_index, Max, until,T, eMax, embedding_size_p){}
   
-  streaming_score = function(input, Min = 100, start_index = start_index, Max = 0, until=0, batch = TRUE ,embedding_size_p = 0, remove=TRUE, remove_threshold = 0.2){
+  streaming_score = function(input, Min = 100, start_index = start_index, T=0.2, eMax=0, Max = 0, until=0, batch = TRUE ,embedding_size_p = 0, remove=TRUE, remove_threshold = 0.2){
     total_start <- Sys.time()
     if(remove==TRUE){
       if(batch==TRUE){  # 
-        pre=fun_batch_remove_TRUE(input=input, Min=Min, start_index= start_index, Max=Max, until=until, embedding_size_p=embedding_size_p, remove_threshold=remove_threshold )
+        pre=fun_batch_remove_TRUE(input=input, Min=Min, start_index= start_index, Max=Max, until=until, embedding_size_p=embedding_size_p, eMax=eMax, T=T, remove_threshold=remove_threshold )
       }else{
-        pre=fun_remove_TRUE(input=input, Min=Min, start_index= start_index, Max=Max, until=until, embedding_size_p=embedding_size_p, remove_threshold=remove_threshold )
+        pre=fun_remove_TRUE(input=input, Min=Min, start_index= start_index, Max=Max, until=until, embedding_size_p=embedding_size_p, eMax=eMax, T=T, remove_threshold=remove_threshold )
       }
     }else{
       if(batch==TRUE){
-        pre=fun_batch_remove_FALSE(input=input, Min=Min, start_index=start_index, Max=Max, until=until, embedding_size_p=embedding_size_p )
+        pre=fun_batch_remove_FALSE(input=input, Min=Min, start_index=start_index, Max=Max, until=until, embedding_size_p=embedding_size_p, eMax=eMax, T=T )
       }else{
-        pre=fun_remove_FALSE(input=input, Min=Min,start_index=start_index, Max=Max, until=until, embedding_size_p=embedding_size_p )
+        pre=fun_remove_FALSE(input=input, Min=Min,start_index=start_index, Max=Max, until=until, embedding_size_p=embedding_size_p, eMax=eMax, T=T )
       }
     }
     total_end <- Sys.time()
@@ -384,7 +425,7 @@ input[which(input$start !=1),'start'] =0
   part = part[-length(part)]  
   output_total = data.frame()
   for(i in part){
-    output = streaming_score(input, Min=100, start_index= i, Max=1000, until = 299, batch=TRUE, remove= FALSE, embedding_size_p=0)  # onehot
+    output = streaming_score(input, Min=100, start_index= i, Max=1000, until = 299, batch=TRUE, remove= FALSE, embedding_size_p=0, T=0.2, eMax=0)  # onehot
     if(is.null(output) == 0 ){
       output = output[order(output$timestamp),]
       start = min(which(output$leverage >=0))
